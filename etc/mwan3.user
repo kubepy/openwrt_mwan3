@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# This file is interpreted as shell script.
+# Put your custom mwan3 action here, they will
+# be executed with each netifd hotplug interface event
+# on interfaces for which mwan3 is enabled.
+#
+# There are three main environment variables that are passed to this script.
+#
+# $ACTION
+#      <ifup>         Is called by netifd and mwan3track.
+#      <ifdown>       Is called by netifd and mwan3track.
+#      <connected>    Is only called by mwan3track if tracking was successful.
+#      <disconnected> Is only called by mwan3track if tracking has failed.
+# $INTERFACE    Name of the interface an action relates to (e.g. "wan" or "wwan").
+# $DEVICE       Physical device name of the interface the action relates to (e.g. "eth0" or "wwan0").
+#               Note: On an ifdown event, $DEVICE is not available, use $INTERFACE instead.
+#
+# Further documentation can be found here:
+# https://openwrt.org/docs/guide-user/network/wan/multiwan/mwan3#alertsnotifications
+
+COUNTER_FILE_PREFIX="/tmp/disconnect_counter"
+
+check_and_restart() {
+    IFACE=$1
+    COUNTER_FILE="${COUNTER_FILE_PREFIX}_${IFACE}.txt"
+
+    if [ "${ACTION}" = "disconnected" ] && [ "${INTERFACE}" = "$IFACE" ] ; then
+        if [ "`ifstatus $IFACE | jq -r '."ipv4-address"[].address | contains("192.168.")'`" == "false" ] ; then
+            if [ ! -f $COUNTER_FILE ]; then
+                echo "1" > $COUNTER_FILE
+            else
+                COUNTER=$(cat $COUNTER_FILE)
+                COUNTER=$((COUNTER + 1))
+                echo $COUNTER > $COUNTER_FILE
+            fi
+
+            if [ $COUNTER -ge 1 ]; then
+                sleep 3 && ifup $IFACE &
+                echo "0" > $COUNTER_FILE
+            fi
+        fi
+    elif [ "${ACTION}" = "connected" ] && [ "${INTERFACE}" = "$IFACE" ] ; then
+        echo "0" > $COUNTER_FILE
+    fi
+}
+
+for i in $(seq 101 107); do
+    check_and_restart "wan$i"
+done
+
+for i in $(seq 111 116); do
+    check_and_restart "wan$i"
+done
